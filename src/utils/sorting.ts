@@ -34,6 +34,12 @@ export function sortAndInterleaveArguments(
     return sortedAgainst;
   }
 
+  if (filter === 'live') {
+    return [...args]
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime())
+      .map((item, idx) => ({ ...item, sideRank: idx + 1 }));
+  }
+
   // Interleaved A1, B1, A2, B2, A3, B3...
   const maxLength = Math.max(sortedFor.length, sortedAgainst.length);
   const result: RankedArgument[] = [];

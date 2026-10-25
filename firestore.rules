@@ -1,0 +1,101 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Default-Deny Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Hardened Global Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function isValidAuthor(author) {
+      return author is map &&
+        author.name is string && author.name.size() > 0 && author.name.size() <= 100 &&
+        author.handle is string && author.handle.size() > 0 && author.handle.size() <= 100 &&
+        author.avatarColor is string && author.avatarColor.size() <= 50 &&
+        author.initials is string && author.initials.size() <= 10;
+    }
+
+    function isValidDebate(data) {
+      return data.keys().hasAll(['id', 'title', 'forVotes', 'againstVotes', 'views', 'likes', 'createdAt']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.title is string && data.title.size() > 0 && data.title.size() <= 500 &&
+        data.forVotes is number && data.forVotes >= 0 &&
+        data.againstVotes is number && data.againstVotes >= 0 &&
+        data.views is number && data.views >= 0 &&
+        data.likes is number && data.likes >= 0 &&
+        data.createdAt is string && data.createdAt.size() <= 50 &&
+        (!('tags' in data) || (data.tags is list && data.tags.size() <= 10)) &&
+        (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 1000)) &&
+        (!('imageCaption' in data) || (data.imageCaption is string && data.imageCaption.size() <= 500)) &&
+        (!('author' in data) || isValidAuthor(data.author));
+    }
+
+    function isValidArgument(data) {
+      return data.keys().hasAll(['id', 'debateId', 'side', 'content', 'likes', 'createdAt']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.debateId is string && data.debateId.size() <= 128 &&
+        (data.side == 'for' || data.side == 'against') &&
+        data.content is string && data.content.size() > 0 && data.content.size() <= 4000 &&
+        data.likes is number && data.likes >= 0 &&
+        data.createdAt is string && data.createdAt.size() <= 50 &&
+        (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 1000)) &&
+        (!('author' in data) || isValidAuthor(data.author));
+    }
+
+    // Debates Collection
+    match /debates/{debateId} {
+      allow get, list: if true;
+
+      allow create: if isSignedIn() &&
+        isValidId(debateId) &&
+        debateId == incoming().id &&
+        isValidDebate(incoming());
+
+      allow update: if isSignedIn() &&
+        isValidId(debateId) &&
+        isValidDebate(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['forVotes', 'againstVotes', 'views', 'likes', 'aiSummary']);
+
+      allow delete: if false;
+    }
+
+    // Arguments Collection
+    match /arguments/{argumentId} {
+      allow get, list: if true;
+
+      allow create: if isSignedIn() &&
+        isValidId(argumentId) &&
+        argumentId == incoming().id &&
+        isValidArgument(incoming()) &&
+        exists(/databases/$(database)/documents/debates/$(incoming().debateId));
+
+      allow update: if isSignedIn() &&
+        isValidId(argumentId) &&
+        isValidArgument(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().debateId == existing().debateId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['likes', 'authenticityCheck']);
+
+      allow delete: if false;
+    }
+  }
+}

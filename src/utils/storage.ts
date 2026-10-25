@@ -1,11 +1,11 @@
 import { Debate, Argument } from '../types';
 import { INITIAL_DEBATES, INITIAL_ARGUMENTS } from '../data/seedData';
 
-const DEBATES_STORAGE_KEY = 'evaad_debates_v4';
-const ARGUMENTS_STORAGE_KEY = 'evaad_arguments_v4';
-const USER_VOTES_KEY = 'evaad_user_votes_v4';
-const USER_ARG_LIKES_KEY = 'evaad_user_arg_likes_v4';
-const USER_DEBATE_LIKES_KEY = 'evaad_user_debate_likes_v4';
+const DEBATES_STORAGE_KEY = 'evaad_debates_v7';
+const ARGUMENTS_STORAGE_KEY = 'evaad_arguments_v7';
+const USER_VOTES_KEY = 'evaad_user_votes_v7';
+const USER_ARG_LIKES_KEY = 'evaad_user_arg_likes_v7';
+const USER_DEBATE_LIKES_KEY = 'evaad_user_debate_likes_v7';
 
 export function getStoredDebates(): Debate[] {
   if (typeof window === 'undefined') return INITIAL_DEBATES;
