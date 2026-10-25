@@ -1,0 +1,6 @@
+{
+  "name": "evaad",
+  "description": "A clean, modern debate platform where every voice gets equal opportunity.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
