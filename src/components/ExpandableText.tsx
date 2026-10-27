@@ -1,4 +1,5 @@
 import React, { useState, useRef, useLayoutEffect, useEffect } from 'react';
+import { useLanguage } from '../contexts/LanguageContext';
 
 interface ExpandableTextProps {
   text: string;
@@ -13,6 +14,7 @@ export const ExpandableText: React.FC<ExpandableTextProps> = ({
   className = '',
   buttonClassName = '',
 }) => {
+  const { t } = useLanguage();
   const [isExpanded, setIsExpanded] = useState(false);
   // Estimate canExpand initially if text has many lines or length is high
   const initialEstimate =
@@ -71,9 +73,10 @@ export const ExpandableText: React.FC<ExpandableTextProps> = ({
           onClick={handleToggle}
           className={`inline-flex items-center gap-1 mt-1.5 font-semibold text-xs text-sky-400 hover:text-sky-300 transition-colors cursor-pointer select-none underline-offset-2 hover:underline ${buttonClassName}`}
         >
-          {isExpanded ? 'Show less' : 'Read more'}
+          {isExpanded ? t('showLess') : t('readMore')}
         </button>
       )}
     </div>
   );
 };
+

@@ -1,6 +1,6 @@
 import { initializeApp } from 'firebase/app';
-import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from 'firebase/auth';
-import { getFirestore, doc, getDocFromServer } from 'firebase/firestore';
+import { getAuth, GoogleAuthProvider, signInWithPopup, signOut, signInAnonymously } from 'firebase/auth';
+import { getFirestore, doc, getDoc, getDocFromServer, setDoc, updateDoc, deleteDoc } from 'firebase/firestore';
 import firebaseConfig from '../firebase-applet-config.json';
 
 export const app = initializeApp(firebaseConfig);
@@ -8,6 +8,17 @@ export const app = initializeApp(firebaseConfig);
 export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+
+export async function ensureAuthUser() {
+  if (!auth.currentUser) {
+    try {
+      await signInAnonymously(auth);
+    } catch (e) {
+      console.warn('Anonymous auth sign-in warning:', e);
+    }
+  }
+  return auth.currentUser;
+}
 
 export enum OperationType {
   CREATE = 'create',
@@ -71,4 +82,4 @@ export async function testConnection() {
   }
 }
 
-export { signInWithPopup, signOut };
+export { signInWithPopup, signOut, signInAnonymously, doc, getDoc, setDoc, updateDoc, deleteDoc };

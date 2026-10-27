@@ -2,7 +2,7 @@
   "entities": {
     "Debate": {
       "title": "Debate",
-      "description": "A debate topic with voting, arguments, views and likes",
+      "description": "A debate topic with voting, arguments, views, likes, and optional referenced post",
       "type": "object",
       "properties": {
         "id": { "type": "string", "maxLength": 128 },
@@ -13,8 +13,9 @@
         "views": { "type": "number" },
         "likes": { "type": "number" },
         "createdAt": { "type": "string" },
-        "imageUrl": { "type": "string", "maxLength": 1000 },
-        "imageCaption": { "type": "string", "maxLength": 500 }
+        "imageUrl": { "type": "string", "maxLength": 900000 },
+        "imageCaption": { "type": "string", "maxLength": 500 },
+        "referencePost": { "type": "object" }
       },
       "required": ["id", "title", "forVotes", "againstVotes", "views", "likes", "createdAt"]
     },
@@ -31,6 +32,67 @@
         "createdAt": { "type": "string" }
       },
       "required": ["id", "debateId", "side", "content", "likes", "createdAt"]
+    },
+    "SocialPost": {
+      "title": "SocialPost",
+      "description": "An X-style social post with text, image, video, comments, and reference support",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "content": { "type": "string", "maxLength": 4000 },
+        "speakerTitle": { "type": "string", "maxLength": 150 },
+        "imageUrl": { "type": "string", "maxLength": 900000 },
+        "videoUrl": { "type": "string", "maxLength": 900000 },
+        "tags": { "type": "array" },
+        "likes": { "type": "number" },
+        "commentsCount": { "type": "number" },
+        "views": { "type": "number" },
+        "debatesCreatedCount": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "content", "likes", "commentsCount", "views", "createdAt"]
+    },
+    "PostComment": {
+      "title": "PostComment",
+      "description": "A standard comment on a social post",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "postId": { "type": "string", "maxLength": 128 },
+        "content": { "type": "string", "maxLength": 2000 },
+        "likes": { "type": "number" },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "postId", "content", "likes", "createdAt"]
+    },
+    "Username": {
+      "title": "Username",
+      "description": "Unique username registry record mapping a lowercased handle to a user UID",
+      "type": "object",
+      "properties": {
+        "handle": { "type": "string", "maxLength": 50 },
+        "uid": { "type": "string", "maxLength": 128 },
+        "updatedAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["handle", "uid"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Push notification alerting a user when their debate or post receives a comment or like",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "type": { "type": "string", "maxLength": 50 },
+        "recipientHandle": { "type": "string", "maxLength": 100 },
+        "recipientUid": { "type": "string", "maxLength": 128 },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "targetType": { "type": "string", "enum": ["debate", "post"] },
+        "targetTitle": { "type": "string", "maxLength": 1000 },
+        "commentSnippet": { "type": "string", "maxLength": 2000 },
+        "read": { "type": "boolean" },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "type", "recipientHandle", "targetId", "targetType", "targetTitle", "read", "createdAt"]
     }
   },
   "firestore": {
@@ -41,6 +103,23 @@
     "/arguments/{argumentId}": {
       "schema": "Argument",
       "description": "Collection of public debate arguments"
+    },
+    "/social_posts/{postId}": {
+      "schema": "SocialPost",
+      "description": "Collection of X-style social posts"
+    },
+    "/post_comments/{commentId}": {
+      "schema": "PostComment",
+      "description": "Collection of comments on social posts"
+    },
+    "/usernames/{username}": {
+      "schema": "Username",
+      "description": "Registry of claimed unique usernames"
+    },
+    "/notifications/{notificationId}": {
+      "schema": "Notification",
+      "description": "Push notifications for debate and post comments and likes"
     }
   }
 }
+

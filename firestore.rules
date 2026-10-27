@@ -31,6 +31,13 @@ service cloud.firestore {
         author.initials is string && author.initials.size() <= 10;
     }
 
+    // Zero-Traceability Rule: Debate & Argument authors must NEVER include a uid or photoURL
+    function isValidUntraceableDebateAuthor(author) {
+      return isValidAuthor(author) &&
+        !('uid' in author) &&
+        !('photoURL' in author);
+    }
+
     function isValidDebate(data) {
       return data.keys().hasAll(['id', 'title', 'forVotes', 'againstVotes', 'views', 'likes', 'createdAt']) &&
         data.id is string && data.id.size() <= 128 &&
@@ -41,9 +48,10 @@ service cloud.firestore {
         data.likes is number && data.likes >= 0 &&
         data.createdAt is string && data.createdAt.size() <= 50 &&
         (!('tags' in data) || (data.tags is list && data.tags.size() <= 10)) &&
-        (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 1000)) &&
+        (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 900000)) &&
         (!('imageCaption' in data) || (data.imageCaption is string && data.imageCaption.size() <= 500)) &&
-        (!('author' in data) || isValidAuthor(data.author));
+        (!('referencePost' in data) || data.referencePost is map) &&
+        (!('author' in data) || isValidUntraceableDebateAuthor(data.author));
     }
 
     function isValidArgument(data) {
@@ -54,7 +62,32 @@ service cloud.firestore {
         data.content is string && data.content.size() > 0 && data.content.size() <= 4000 &&
         data.likes is number && data.likes >= 0 &&
         data.createdAt is string && data.createdAt.size() <= 50 &&
-        (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 1000)) &&
+        (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 900000)) &&
+        (!('author' in data) || isValidUntraceableDebateAuthor(data.author));
+    }
+
+    function isValidSocialPost(data) {
+      return data.keys().hasAll(['id', 'content', 'likes', 'commentsCount', 'views', 'createdAt']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.content is string && data.content.size() <= 4000 &&
+        data.likes is number && data.likes >= 0 &&
+        data.commentsCount is number && data.commentsCount >= 0 &&
+        data.views is number && data.views >= 0 &&
+        data.createdAt is string && data.createdAt.size() <= 50 &&
+        (!('speakerTitle' in data) || (data.speakerTitle is string && data.speakerTitle.size() <= 150)) &&
+        (!('imageUrl' in data) || (data.imageUrl is string && data.imageUrl.size() <= 900000)) &&
+        (!('videoUrl' in data) || (data.videoUrl is string && data.videoUrl.size() <= 900000)) &&
+        (!('tags' in data) || (data.tags is list && data.tags.size() <= 10)) &&
+        (!('author' in data) || isValidAuthor(data.author));
+    }
+
+    function isValidPostComment(data) {
+      return data.keys().hasAll(['id', 'postId', 'content', 'likes', 'createdAt']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.postId is string && data.postId.size() <= 128 &&
+        data.content is string && data.content.size() > 0 && data.content.size() <= 2000 &&
+        data.likes is number && data.likes >= 0 &&
+        data.createdAt is string && data.createdAt.size() <= 50 &&
         (!('author' in data) || isValidAuthor(data.author));
     }
 
@@ -72,9 +105,9 @@ service cloud.firestore {
         isValidDebate(incoming()) &&
         incoming().id == existing().id &&
         incoming().createdAt == existing().createdAt &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['forVotes', 'againstVotes', 'views', 'likes', 'aiSummary']);
+        incoming().diff(existing()).affectedKeys().hasOnly(['forVotes', 'againstVotes', 'views', 'likes', 'aiSummary', 'title', 'tags', 'imageCaption', 'imageUrl', 'referencePost']);
 
-      allow delete: if false;
+      allow delete: if isSignedIn();
     }
 
     // Arguments Collection
@@ -93,9 +126,119 @@ service cloud.firestore {
         incoming().id == existing().id &&
         incoming().debateId == existing().debateId &&
         incoming().createdAt == existing().createdAt &&
-        incoming().diff(existing()).affectedKeys().hasOnly(['likes', 'authenticityCheck']);
+        incoming().diff(existing()).affectedKeys().hasOnly(['likes', 'authenticityCheck', 'content']);
 
-      allow delete: if false;
+      allow delete: if isSignedIn();
+    }
+
+    // Social Posts Collection (X-style Posts section)
+    match /social_posts/{postId} {
+      allow get, list: if true;
+
+      allow create: if isSignedIn() &&
+        isValidId(postId) &&
+        postId == incoming().id &&
+        isValidSocialPost(incoming());
+
+      allow update: if isSignedIn() &&
+        isValidId(postId) &&
+        isValidSocialPost(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['likes', 'commentsCount', 'views', 'debatesCreatedCount', 'content']);
+
+      allow delete: if isSignedIn();
+    }
+
+    // Post Comments Collection (Comments-only thread on Social Posts)
+    match /post_comments/{commentId} {
+      allow get, list: if true;
+
+      allow create: if isSignedIn() &&
+        isValidId(commentId) &&
+        commentId == incoming().id &&
+        isValidPostComment(incoming());
+
+      allow update: if isSignedIn() &&
+        isValidId(commentId) &&
+        isValidPostComment(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().postId == existing().postId &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['likes', 'content']);
+
+      allow delete: if isSignedIn();
+    }
+
+    // Usernames Uniqueness Registry
+    match /usernames/{username} {
+      allow get, list: if true;
+      allow create, update: if isSignedIn() &&
+        username is string && username.size() >= 3 && username.size() <= 30 &&
+        incoming().handle is string &&
+        incoming().uid is string;
+      allow delete: if isSignedIn();
+    }
+
+    function isValidNotification(data) {
+      return data.keys().hasAll(['id', 'type', 'recipientHandle', 'targetId', 'targetType', 'targetTitle', 'read', 'createdAt']) &&
+        data.id is string && data.id.size() <= 128 &&
+        data.type is string && data.type.size() <= 50 &&
+        data.recipientHandle is string && data.recipientHandle.size() <= 100 &&
+        data.targetId is string && data.targetId.size() <= 128 &&
+        (data.targetType == 'debate' || data.targetType == 'post') &&
+        data.targetTitle is string && data.targetTitle.size() <= 1000 &&
+        data.read is bool &&
+        data.createdAt is string && data.createdAt.size() <= 50 &&
+        (!('commentSnippet' in data) || (data.commentSnippet is string && data.commentSnippet.size() <= 2000)) &&
+        (!('actor' in data) || isValidAuthor(data.actor));
+    }
+
+    // Push Notifications Collection
+    match /notifications/{notificationId} {
+      allow get, list: if true;
+
+      allow create: if isSignedIn() &&
+        isValidId(notificationId) &&
+        notificationId == incoming().id &&
+        isValidNotification(incoming());
+
+      allow update: if isSignedIn() &&
+        isValidId(notificationId) &&
+        isValidNotification(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['read']);
+
+      allow delete: if isSignedIn();
+    }
+
+    // Zero-Traceability Anonymous Moderation Reports
+    // Strictly forbids any uid, reporterHandle, reporterName, or author field
+    function isValidUntraceableReport(data) {
+      return data.keys().hasAll(['id', 'targetType', 'targetId', 'debateId', 'targetPreview', 'reason', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'targetType', 'targetId', 'debateId', 'targetPreview', 'reason', 'details', 'createdAt']) &&
+        data.id is string && data.id.size() <= 128 &&
+        (data.targetType == 'debate' || data.targetType == 'argument') &&
+        data.targetId is string && data.targetId.size() <= 128 &&
+        data.debateId is string && data.debateId.size() <= 128 &&
+        data.targetPreview is string && data.targetPreview.size() <= 1000 &&
+        data.reason is string && data.reason.size() <= 50 &&
+        (!('details' in data) || (data.details is string && data.details.size() <= 1000)) &&
+        data.createdAt is string && data.createdAt.size() <= 50;
+    }
+
+    match /moderation_reports/{reportId} {
+      allow get, list: if false;
+
+      allow create: if isSignedIn() &&
+        isValidId(reportId) &&
+        reportId == incoming().id &&
+        isValidUntraceableReport(incoming());
+
+      allow update, delete: if false;
     }
   }
 }
+
+
