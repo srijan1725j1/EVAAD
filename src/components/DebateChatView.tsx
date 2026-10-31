@@ -357,7 +357,7 @@ export const DebateChatView: React.FC<DebateChatViewProps> = ({
   };
 
   return (
-    <div className={`min-h-screen flex flex-col font-sans relative overflow-x-hidden ${isDark ? 'bg-black text-white' : 'bg-slate-50 text-slate-900'}`}>
+    <div className={`min-h-screen flex flex-col font-sans relative overflow-x-clip ${isDark ? 'bg-black text-white' : 'bg-slate-50 text-slate-900'}`}>
       {/* Offline connectivity indicator */}
       <OfflineIndicator />
 

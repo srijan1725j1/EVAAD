@@ -213,32 +213,47 @@ service cloud.firestore {
       allow delete: if isSignedIn();
     }
 
+    function isAdmin() {
+      return isSignedIn() &&
+        request.auth.token.email == "chandra.oms@gmail.com" &&
+        request.auth.token.email_verified == true;
+    }
+
     // Zero-Traceability Anonymous Moderation Reports
     // Strictly forbids any uid, reporterHandle, reporterName, or author field
     function isValidUntraceableReport(data) {
       return data.keys().hasAll(['id', 'targetType', 'targetId', 'debateId', 'targetPreview', 'reason', 'createdAt']) &&
-        data.keys().hasOnly(['id', 'targetType', 'targetId', 'debateId', 'targetPreview', 'reason', 'details', 'createdAt']) &&
+        data.keys().hasOnly(['id', 'targetType', 'targetId', 'debateId', 'targetPreview', 'reason', 'details', 'status', 'createdAt']) &&
         data.id is string && data.id.size() <= 128 &&
-        (data.targetType == 'debate' || data.targetType == 'argument') &&
+        (data.targetType == 'debate' || data.targetType == 'argument' || data.targetType == 'post' || data.targetType == 'post_comment') &&
         data.targetId is string && data.targetId.size() <= 128 &&
         data.debateId is string && data.debateId.size() <= 128 &&
         data.targetPreview is string && data.targetPreview.size() <= 1000 &&
         data.reason is string && data.reason.size() <= 50 &&
         (!('details' in data) || (data.details is string && data.details.size() <= 1000)) &&
+        (!('status' in data) || (data.status == 'pending' || data.status == 'resolved' || data.status == 'dismissed')) &&
         data.createdAt is string && data.createdAt.size() <= 50;
     }
 
     match /moderation_reports/{reportId} {
-      allow get, list: if false;
+      allow get, list: if isAdmin();
 
       allow create: if isSignedIn() &&
         isValidId(reportId) &&
         reportId == incoming().id &&
         isValidUntraceableReport(incoming());
 
-      allow update, delete: if false;
+      allow update: if isAdmin() &&
+        isValidId(reportId) &&
+        isValidUntraceableReport(incoming()) &&
+        incoming().id == existing().id &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['status']);
+
+      allow delete: if isAdmin();
     }
   }
 }
+
 
 

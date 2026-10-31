@@ -142,6 +142,7 @@ export type ModerationReportReason =
   | 'harassment'
   | 'doxxing_privacy'
   | 'misinformation'
+  | 'copyright'
   | 'spam'
   | 'other';
 
@@ -152,13 +153,15 @@ export type ModerationReportReason =
  */
 export interface AnonymousModerationReport {
   id: string;
-  targetType: 'debate' | 'argument';
+  targetType: 'debate' | 'argument' | 'post' | 'post_comment';
   targetId: string;
   debateId: string;
   targetPreview: string;
   reason: ModerationReportReason;
   details?: string;
+  status?: 'pending' | 'resolved' | 'dismissed';
   createdAt: string;
 }
+
 
 

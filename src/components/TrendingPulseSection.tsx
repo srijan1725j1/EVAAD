@@ -12,6 +12,9 @@ import { Debate } from '../types';
 import { useTheme } from '../contexts/ThemeContext';
 import { useLanguage } from '../contexts/LanguageContext';
 import { AiSearchSynthesis } from './AiSearchCard';
+import { AdPreferences } from '../utils/adPersonalization';
+import { AdUnitCard } from './AdUnitCard';
+import { InfoPageRoute } from './InfoPagesView';
 
 export interface TrendingPulseItem {
   id: string;
@@ -141,19 +144,29 @@ const SIMPLE_CATEGORIES = [
 interface TrendingPulseSectionProps {
   variant: 'glimpse' | 'sidebar' | 'page';
   debates: Debate[];
+  adPreferences?: AdPreferences;
+  contextualTags?: string[];
   onOpenTrendingPage: () => void;
   onBackToDebates?: () => void;
   onSelectDebate: (debate: Debate) => void;
   onLaunchTrendDebate: (synthesis: AiSearchSynthesis) => void;
+  onDismissAd?: (campaignId: string) => void;
+  onOpenAdSettings?: () => void;
+  onNavigateInfoPage?: (page: InfoPageRoute) => void;
 }
 
 export const TrendingPulseSection: React.FC<TrendingPulseSectionProps> = ({
   variant,
   debates,
+  adPreferences,
+  contextualTags = [],
   onOpenTrendingPage,
   onBackToDebates,
   onSelectDebate,
   onLaunchTrendDebate,
+  onDismissAd,
+  onOpenAdSettings,
+  onNavigateInfoPage,
 }) => {
   const { isDark } = useTheme();
   const { language } = useLanguage();
@@ -339,13 +352,14 @@ export const TrendingPulseSection: React.FC<TrendingPulseSectionProps> = ({
     const topFive = items.slice(0, 5);
     return (
       <aside className="hidden lg:block w-80 xl:w-[340px] shrink-0">
-        <div
-          className={`sticky top-20 rounded-2xl border overflow-hidden transition-colors ${
-            isDark
-              ? 'bg-[#070a14] border-[#1a2236] shadow-lg'
-              : 'bg-white border-slate-200 shadow-xs'
-          }`}
-        >
+        <div className="sticky top-28">
+          <div
+            className={`rounded-2xl border overflow-hidden transition-colors ${
+              isDark
+                ? 'bg-[#070a14] border-[#1a2236] shadow-lg'
+                : 'bg-white border-slate-200 shadow-xs'
+            }`}
+          >
           {/* Distinct Hot Topic Today Header */}
           <div
             className={`px-4 py-3 border-b flex items-center justify-between ${
@@ -474,19 +488,128 @@ export const TrendingPulseSection: React.FC<TrendingPulseSectionProps> = ({
             })}
           </div>
 
-          {/* Open Full Dedicated Trending Page Button */}
-          <button
-            type="button"
-            onClick={onOpenTrendingPage}
-            className={`w-full px-4 py-3 text-xs font-bold border-t flex items-center justify-between transition-colors cursor-pointer ${
-              isDark
-                ? 'border-[#1a2236] bg-[#0a0f1e] text-amber-400 hover:bg-[#10172d]'
-                : 'border-slate-200 bg-amber-50/50 text-amber-700 hover:bg-amber-100/60'
-            }`}
-          >
-            <span>Open Full Trending Page</span>
-            <ArrowRight className="w-3.5 h-3.5" />
-          </button>
+            {/* Open Full Dedicated Trending Page Button */}
+            <button
+              type="button"
+              onClick={onOpenTrendingPage}
+              className={`w-full px-4 py-3 text-xs font-bold border-t flex items-center justify-between transition-colors cursor-pointer ${
+                isDark
+                  ? 'border-[#1a2236] bg-[#0a0f1e] text-amber-400 hover:bg-[#10172d]'
+                  : 'border-slate-200 bg-amber-50/50 text-amber-700 hover:bg-amber-100/60'
+              }`}
+            >
+              <span>Open Full Trending Page</span>
+              <ArrowRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Desktop Right Sidebar Display Ad Unit */}
+          {adPreferences && onDismissAd && onOpenAdSettings && (
+            <AdUnitCard
+              slotIndex={0}
+              placement="sidebar"
+              adPreferences={adPreferences}
+              contextualTags={contextualTags}
+              onDismissAd={onDismissAd}
+              onOpenAdSettings={onOpenAdSettings}
+            />
+          )}
+
+          {/* Pinned Sticky Sidebar Quick Links (Always visible while scrolling long feeds) */}
+          {onNavigateInfoPage && (
+            <nav
+              aria-label="Sidebar Policy and Platform Links"
+              className={`mt-3 px-3.5 py-3 rounded-2xl border text-[11px] leading-relaxed transition-colors ${
+                isDark
+                  ? 'bg-[#060913]/90 border-[#141b2d] text-slate-400'
+                  : 'bg-white border-slate-200 text-slate-500 shadow-2xs'
+              }`}
+            >
+              <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
+                <a
+                  href="/about"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigateInfoPage('about');
+                  }}
+                  className={`font-semibold transition-colors hover:underline ${
+                    isDark ? 'hover:text-white text-slate-300' : 'hover:text-slate-900 text-slate-700'
+                  }`}
+                >
+                  About
+                </a>
+                <span aria-hidden="true" className="opacity-40">·</span>
+                <a
+                  href="/guidelines"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigateInfoPage('guidelines');
+                  }}
+                  className={`font-semibold transition-colors hover:underline ${
+                    isDark ? 'hover:text-white text-slate-300' : 'hover:text-slate-900 text-slate-700'
+                  }`}
+                >
+                  Community Guidelines
+                </a>
+                <span aria-hidden="true" className="opacity-40">·</span>
+                <a
+                  href="/privacy"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigateInfoPage('privacy');
+                  }}
+                  className={`font-semibold transition-colors hover:underline ${
+                    isDark ? 'hover:text-white text-slate-300' : 'hover:text-slate-900 text-slate-700'
+                  }`}
+                >
+                  Privacy Policy
+                </a>
+                <span aria-hidden="true" className="opacity-40">·</span>
+                <a
+                  href="/contact"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigateInfoPage('contact');
+                  }}
+                  className={`font-semibold transition-colors hover:underline ${
+                    isDark ? 'hover:text-white text-slate-300' : 'hover:text-slate-900 text-slate-700'
+                  }`}
+                >
+                  Contact
+                </a>
+                <span aria-hidden="true" className="opacity-40">·</span>
+                <a
+                  href="/moderation"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onNavigateInfoPage('moderation');
+                  }}
+                  className={`font-semibold transition-colors hover:underline ${
+                    isDark ? 'hover:text-white text-slate-300' : 'hover:text-slate-900 text-slate-700'
+                  }`}
+                >
+                  Moderation &amp; Safety
+                </a>
+                {onOpenAdSettings && (
+                  <>
+                    <span aria-hidden="true" className="opacity-40">·</span>
+                    <button
+                      type="button"
+                      onClick={onOpenAdSettings}
+                      className={`font-semibold transition-colors hover:underline cursor-pointer ${
+                        isDark ? 'hover:text-white text-slate-300' : 'hover:text-slate-900 text-slate-700'
+                      }`}
+                    >
+                      Ad Preferences
+                    </button>
+                  </>
+                )}
+              </div>
+              <div className="mt-1.5 text-[10px] font-mono opacity-70">
+                © {new Date().getFullYear()} evaad · Respectful 180° Perspectives
+              </div>
+            </nav>
+          )}
         </div>
       </aside>
     );

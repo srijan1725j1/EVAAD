@@ -14,11 +14,14 @@ import {
   Eye,
   Quote,
   ArrowLeft,
+  Flag,
 } from 'lucide-react';
 import { useTheme } from '../contexts/ThemeContext';
 import { formatCompactNumber, formatRelativeTime } from '../utils/format';
 import { TranslatedTextBlock } from './TranslatedTextBlock';
 import { copyToClipboard, getShareUrl } from '../utils/clipboard';
+import { AdPreferences, getVariableAdPlacements } from '../utils/adPersonalization';
+import { AdUnitCard } from './AdUnitCard';
 
 interface PostsSectionProps {
   posts: SocialPost[];
@@ -27,7 +30,9 @@ interface PostsSectionProps {
   currentAuthor: Author;
   userPostLikes: Record<string, boolean>;
   userCommentLikes: Record<string, boolean>;
+  reportedItems?: Record<string, boolean>;
   selectedPostId: string | null;
+  adPreferences?: AdPreferences;
   onSelectPostId: (postId: string | null) => void;
   onCreatePost: (post: SocialPost) => void;
   onTogglePostLike: (postId: string) => void;
@@ -36,6 +41,10 @@ interface PostsSectionProps {
   onStartDebateFromPost: (post: SocialPost) => void;
   onOpenDebate?: (debate: Debate) => void;
   onOpenProfileSettings?: () => void;
+  onReportPost?: (post: SocialPost) => void;
+  onReportPostComment?: (comment: PostComment) => void;
+  onDismissAd?: (campaignId: string) => void;
+  onOpenAdSettings?: () => void;
 }
 
 const POST_TAGS = ['INDIA', 'POLITICS', 'SPORTS', 'TECH', 'WORK', 'CULTURE', 'EDUCATION'];
@@ -58,7 +67,9 @@ export const PostsSection: React.FC<PostsSectionProps> = ({
   currentAuthor,
   userPostLikes,
   userCommentLikes,
+  reportedItems = {},
   selectedPostId,
+  adPreferences,
   onSelectPostId,
   onCreatePost,
   onTogglePostLike,
@@ -67,6 +78,10 @@ export const PostsSection: React.FC<PostsSectionProps> = ({
   onStartDebateFromPost,
   onOpenDebate,
   onOpenProfileSettings,
+  onReportPost,
+  onReportPostComment,
+  onDismissAd,
+  onOpenAdSettings,
 }) => {
   const { isDark } = useTheme();
 
@@ -500,21 +515,35 @@ export const PostsSection: React.FC<PostsSectionProps> = ({
 
       {/* X-Style Posts Feed (Comments Only — No For/Against Bar, with "Start Debate" Reference Action) */}
       <div className="w-full border-t border-b sm:border sm:rounded-2xl sm:overflow-hidden border-slate-200 dark:border-[#141928] bg-white dark:bg-[#060810]/95 divide-y divide-slate-200 dark:divide-[#141928]">
-        {displayPosts.map((post) => {
-          const postComments = comments.filter((c) => c.postId === post.id);
-          const isLiked = !!userPostLikes[post.id];
-          const isCommentsOpen = !!expandedComments[post.id] || !!focusedPost;
-          const linkedDebates = debates.filter(
-            (d) => d.referencePost?.postId === post.id
+        {(() => {
+          const postAdPlacements = getVariableAdPlacements(
+            displayPosts.length,
+            'social_posts',
+            6,
+            10
           );
+          return displayPosts.map((post, postIdx) => {
+            const postComments = comments.filter((c) => c.postId === post.id);
+            const isLiked = !!userPostLikes[post.id];
+            const isCommentsOpen = !!expandedComments[post.id] || !!focusedPost;
+            const linkedDebates = debates.filter(
+              (d) => d.referencePost?.postId === post.id
+            );
+            const adSlotIndex = postAdPlacements.get(postIdx);
+            const shouldRenderAdAfter =
+              !focusedPost &&
+              adPreferences &&
+              onDismissAd &&
+              onOpenAdSettings &&
+              adSlotIndex !== undefined;
 
           return (
-            <article
-              key={post.id}
-              className={`px-4 sm:px-5 py-3.5 sm:py-4 transition-colors ${
-                isDark ? 'hover:bg-[#080c18]/80' : 'hover:bg-slate-50/70'
-              }`}
-            >
+            <React.Fragment key={post.id}>
+              <article
+                className={`px-4 sm:px-5 py-3.5 sm:py-4 transition-colors ${
+                  isDark ? 'hover:bg-[#080c18]/80' : 'hover:bg-slate-50/70'
+                }`}
+              >
               {/* Top Author Row */}
               <div className="flex items-center justify-between gap-2 mb-2">
                 <div className="flex items-center gap-2 min-w-0 flex-wrap">
@@ -696,6 +725,34 @@ export const PostsSection: React.FC<PostsSectionProps> = ({
                       <Share2 className="w-3.5 h-3.5" />
                     )}
                   </button>
+
+                  {/* Report Post Button */}
+                  {onReportPost && (
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        onReportPost(post);
+                      }}
+                      title={
+                        reportedItems[post.id]
+                          ? 'Reported for moderation'
+                          : 'Report post for moderation'
+                      }
+                      className={`inline-flex items-center gap-1 px-1.5 py-1 rounded-lg text-xs font-mono transition-colors cursor-pointer whitespace-nowrap ${
+                        reportedItems[post.id]
+                          ? 'text-amber-400 bg-amber-500/10'
+                          : isDark
+                          ? 'text-slate-500 hover:text-rose-400 hover:bg-white/[0.04]'
+                          : 'text-slate-400 hover:text-rose-600 hover:bg-slate-100'
+                      }`}
+                    >
+                      <Flag className="w-3.5 h-3.5" />
+                      {reportedItems[post.id] && (
+                        <span className="text-[10px]">Reported</span>
+                      )}
+                    </button>
+                  )}
                 </div>
 
                 {/* USE AS REFERENCE TO START A DEBATE BUTTON */}
@@ -845,24 +902,47 @@ export const PostsSection: React.FC<PostsSectionProps> = ({
                                   </span>
                                 </div>
 
-                                <button
-                                  type="button"
-                                  onClick={() => onToggleCommentLike(comm.id)}
-                                  className={`inline-flex items-center gap-1 text-[11px] font-mono cursor-pointer ${
-                                    commLiked
-                                      ? 'text-rose-500 font-bold'
-                                      : isDark
-                                      ? 'text-slate-500 hover:text-rose-400'
-                                      : 'text-slate-400 hover:text-rose-600'
-                                  }`}
-                                >
-                                  <Heart
-                                    className={`w-3 h-3 ${
-                                      commLiked ? 'fill-rose-500 text-rose-500' : ''
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <button
+                                    type="button"
+                                    onClick={() => onToggleCommentLike(comm.id)}
+                                    className={`inline-flex items-center gap-1 text-[11px] font-mono cursor-pointer ${
+                                      commLiked
+                                        ? 'text-rose-500 font-bold'
+                                        : isDark
+                                        ? 'text-slate-500 hover:text-rose-400'
+                                        : 'text-slate-400 hover:text-rose-600'
                                     }`}
-                                  />
-                                  <span>{comm.likes}</span>
-                                </button>
+                                  >
+                                    <Heart
+                                      className={`w-3 h-3 ${
+                                        commLiked ? 'fill-rose-500 text-rose-500' : ''
+                                      }`}
+                                    />
+                                    <span>{comm.likes}</span>
+                                  </button>
+
+                                  {onReportPostComment && (
+                                    <button
+                                      type="button"
+                                      onClick={() => onReportPostComment(comm)}
+                                      title={
+                                        reportedItems[comm.id]
+                                          ? 'Reported for moderation'
+                                          : 'Report comment for moderation'
+                                      }
+                                      className={`inline-flex items-center gap-1 text-[11px] font-mono cursor-pointer ${
+                                        reportedItems[comm.id]
+                                          ? 'text-amber-400'
+                                          : isDark
+                                          ? 'text-slate-600 hover:text-rose-400'
+                                          : 'text-slate-400 hover:text-rose-600'
+                                      }`}
+                                    >
+                                      <Flag className="w-3 h-3" />
+                                    </button>
+                                  )}
+                                </div>
                               </div>
 
                               <div
@@ -884,9 +964,22 @@ export const PostsSection: React.FC<PostsSectionProps> = ({
                   )}
                 </div>
               )}
-            </article>
+              </article>
+
+              {shouldRenderAdAfter && adSlotIndex !== undefined && (
+                <AdUnitCard
+                  slotIndex={adSlotIndex + 1}
+                  placement="infeed-post"
+                  adPreferences={adPreferences}
+                  contextualTags={post.tags}
+                  onDismissAd={onDismissAd}
+                  onOpenAdSettings={onOpenAdSettings}
+                />
+              )}
+            </React.Fragment>
           );
-        })}
+        });
+        })()}
       </div>
     </div>
   );

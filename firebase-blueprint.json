@@ -93,6 +93,23 @@
         "createdAt": { "type": "string", "maxLength": 50 }
       },
       "required": ["id", "type", "recipientHandle", "targetId", "targetType", "targetTitle", "read", "createdAt"]
+    },
+    "ModerationReport": {
+      "title": "ModerationReport",
+      "description": "Untraceable anonymous content report across debates, arguments, posts, and post comments",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "maxLength": 128 },
+        "targetType": { "type": "string", "enum": ["debate", "argument", "post", "post_comment"] },
+        "targetId": { "type": "string", "maxLength": 128 },
+        "debateId": { "type": "string", "maxLength": 128 },
+        "targetPreview": { "type": "string", "maxLength": 1000 },
+        "reason": { "type": "string", "maxLength": 50 },
+        "details": { "type": "string", "maxLength": 1000 },
+        "status": { "type": "string", "enum": ["pending", "resolved", "dismissed"] },
+        "createdAt": { "type": "string", "maxLength": 50 }
+      },
+      "required": ["id", "targetType", "targetId", "debateId", "targetPreview", "reason", "createdAt"]
     }
   },
   "firestore": {
@@ -119,7 +136,12 @@
     "/notifications/{notificationId}": {
       "schema": "Notification",
       "description": "Push notifications for debate and post comments and likes"
+    },
+    "/moderation_reports/{reportId}": {
+      "schema": "ModerationReport",
+      "description": "Untraceable moderation reports for debates, arguments, posts, and comments"
     }
   }
 }
+
 

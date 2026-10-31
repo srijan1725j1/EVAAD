@@ -61,6 +61,17 @@ import { AiSearchCard, AiSearchSynthesis } from './components/AiSearchCard';
 import { TrendingPulseSection } from './components/TrendingPulseSection';
 import { NotificationBell, PushNotificationToast } from './components/NotificationBell';
 import { ReportModal, ReportTargetInfo } from './components/ReportModal';
+import { AdUnitCard } from './components/AdUnitCard';
+import { InfoPagesView, InfoPageRoute } from './components/InfoPagesView';
+import { Footer } from './components/Footer';
+import {
+  AdPreferences,
+  loadAdPreferences,
+  saveAdPreferences,
+  recordTagAffinity,
+  syncAdSensePrivacyFlags,
+  getVariableAdPlacements,
+} from './utils/adPersonalization';
 import {
   playNotificationChime,
   triggerBrowserPushNotification,
@@ -78,6 +89,7 @@ import {
   MessageSquareText,
   VenetianMask,
   User,
+  ArrowUp,
 } from 'lucide-react';
 import {
   auth,
@@ -111,6 +123,33 @@ function sanitizeForFirestore<T>(obj: T): T {
     }
   }
   return clean as T;
+}
+
+const INFO_PAGE_PATHS: Record<string, InfoPageRoute> = {
+  '/about': 'about',
+  '/guidelines': 'guidelines',
+  '/community-guidelines': 'guidelines',
+  '/privacy': 'privacy',
+  '/privacy-policy': 'privacy',
+  '/contact': 'contact',
+  '/moderation': 'moderation',
+};
+
+function parseRouteFromPathname(pathname: string): {
+  infoPage: InfoPageRoute | null;
+  section: 'debates' | 'posts' | 'trending';
+} {
+  const normalized = pathname.replace(/\/+$/, '').toLowerCase() || '/';
+  if (INFO_PAGE_PATHS[normalized]) {
+    return { infoPage: INFO_PAGE_PATHS[normalized], section: 'debates' };
+  }
+  if (normalized === '/posts') {
+    return { infoPage: null, section: 'posts' };
+  }
+  if (normalized === '/trending') {
+    return { infoPage: null, section: 'trending' };
+  }
+  return { infoPage: null, section: 'debates' };
 }
 
 export default function App() {
@@ -156,25 +195,145 @@ export default function App() {
   const [reportedItems, setReportedItems] = useState<Record<string, boolean>>(() =>
     getStoredReportedItems()
   );
+  const [moderationReports, setModerationReports] = useState<AnonymousModerationReport[]>(() =>
+    getStoredAnonymousReports()
+  );
   const [reportTarget, setReportTarget] = useState<ReportTargetInfo | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedTag, setSelectedTag] = useState<string>('ALL');
   const [ambientEnabled, setAmbientEnabled] = useState(true);
   // 2 Main Sections ('debates' | 'posts') + 1 Sub-Section ('trending')
-  const [activeSection, setActiveSection] = useState<'debates' | 'posts' | 'trending'>('debates');
+  const [activeSection, setActiveSection] = useState<'debates' | 'posts' | 'trending'>(
+    () => parseRouteFromPathname(window.location.pathname).section
+  );
+  const [activeInfoPage, setActiveInfoPage] = useState<InfoPageRoute | null>(
+    () => parseRouteFromPathname(window.location.pathname).infoPage
+  );
+  const [currentUserEmail, setCurrentUserEmail] = useState<string | null>(null);
   const [isContestedOnly, setIsContestedOnly] = useState(false);
+  const [adPreferences, setAdPreferences] = useState<AdPreferences>(() => loadAdPreferences());
+  const [showBackToTop, setShowBackToTop] = useState(false);
 
-  // Test connection & ensure auth on mount
+  // Track scroll position to display floating 'Back to Top' button past initial screen
+  useEffect(() => {
+    const handleScroll = () => {
+      setShowBackToTop(window.scrollY > 360);
+    };
+    window.addEventListener('scroll', handleScroll, { passive: true });
+    handleScroll();
+    return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  const handleScrollToTop = () => {
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const configuredAdminEmail = (
+    import.meta.env.VITE_ADMIN_EMAIL || 'chandra.oms@gmail.com'
+  )
+    .trim()
+    .toLowerCase();
+  const isAdminUser = Boolean(
+    currentUserEmail && currentUserEmail.toLowerCase() === configuredAdminEmail
+  );
+
+  const handleNavigateInfoPage = (page: InfoPageRoute) => {
+    setSelectedDebate(null);
+    setActiveInfoPage(page);
+    const targetPath = `/${page}`;
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({ infoPage: page }, '', targetPath);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const handleNavigateSection = (section: 'debates' | 'posts' | 'trending') => {
+    setSelectedDebate(null);
+    setActiveInfoPage(null);
+    setActiveSection(section);
+    if (section !== 'posts') {
+      setSelectedPostId(null);
+    }
+    const targetPath = section === 'debates' ? '/' : `/${section}`;
+    if (window.location.pathname !== targetPath) {
+      window.history.pushState({ section, infoPage: null }, '', targetPath);
+    }
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  // Test connection, ensure auth, and sync AdSense privacy flags on mount
   useEffect(() => {
     testConnection();
     ensureAuthUser();
+    syncAdSensePrivacyFlags(adPreferences.personalizedAdsEnabled);
   }, []);
+
+  const handleDismissAd = (campaignId: string) => {
+    setAdPreferences((prev) => {
+      if (prev.dismissedAdIds.includes(campaignId)) return prev;
+      const next: AdPreferences = {
+        ...prev,
+        dismissedAdIds: [...prev.dismissedAdIds, campaignId],
+        updatedAt: new Date().toISOString(),
+      };
+      saveAdPreferences(next);
+      return next;
+    });
+  };
+
+  const handleTogglePersonalizedAds = () => {
+    setAdPreferences((prev) => {
+      const next: AdPreferences = {
+        ...prev,
+        personalizedAdsEnabled: !prev.personalizedAdsEnabled,
+        updatedAt: new Date().toISOString(),
+      };
+      saveAdPreferences(next);
+      return next;
+    });
+  };
+
+  const handleResetAdInterests = () => {
+    const resetPrefs: AdPreferences = {
+      personalizedAdsEnabled: adPreferences.personalizedAdsEnabled,
+      tagAffinities: { INDIA: 2, TECH: 2 },
+      dismissedAdIds: [],
+      updatedAt: new Date().toISOString(),
+    };
+    saveAdPreferences(resetPrefs);
+    setAdPreferences(resetPrefs);
+  };
+
+  const handleStartSponsoredDebate = (question: string, tags: string[]) => {
+    const existing = debates.find(
+      (d) => d.title.trim().toLowerCase() === question.trim().toLowerCase()
+    );
+    if (existing) {
+      handleSelectDebate(existing);
+      return;
+    }
+    const untraceableAuthor = stripTraceableFieldsForDebate(currentAuthor);
+    const sponsoredDebate: Debate = {
+      id: 'debate_sp_' + Date.now().toString(36),
+      title: question,
+      tags: tags.slice(0, 3),
+      author: untraceableAuthor,
+      forVotes: 1,
+      againstVotes: 1,
+      views: 1,
+      likes: 1,
+      createdAt: new Date().toISOString(),
+    };
+    setDebates((prev) => [sponsoredDebate, ...prev]);
+    handleSelectDebate(sponsoredDebate);
+  };
 
   // Listen to Firebase Auth state — bind Google account EXCLUSIVELY to Public Post Profile
   // NEVER attach Google UID or real name to the Anonymous Debate Persona (currentAuthor)
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
       if (user && !user.isAnonymous) {
+        setCurrentUserEmail(user.email || null);
         const localPostAuthor = getPublicPostAuthor();
         const debatePersona = getCurrentAuthor();
         const debateHandleClean = cleanUsername(debatePersona.handle);
@@ -225,11 +384,43 @@ export default function App() {
 
         setPublicPostAuthor(updatedPublicProfile);
         savePublicPostAuthor(updatedPublicProfile);
+      } else {
+        setCurrentUserEmail(null);
       }
     });
 
     return () => unsubscribe();
   }, []);
+
+  // Sync Firestore moderation_reports when admin user is signed in
+  useEffect(() => {
+    if (!isAdminUser) return;
+    const unsubscribeReports = onSnapshot(
+      collection(db, 'moderation_reports'),
+      (snapshot) => {
+        if (!snapshot.empty) {
+          const loaded: AnonymousModerationReport[] = [];
+          snapshot.forEach((docSnap) => {
+            loaded.push(docSnap.data() as AnonymousModerationReport);
+          });
+          setModerationReports((prev) => {
+            const map = new Map<string, AnonymousModerationReport>();
+            loaded.forEach((r) => map.set(r.id, r));
+            prev.forEach((r) => {
+              if (!map.has(r.id)) map.set(r.id, r);
+            });
+            const merged = Array.from(map.values()).sort(
+              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            );
+            saveStoredAnonymousReports(merged);
+            return merged;
+          });
+        }
+      },
+      () => {}
+    );
+    return () => unsubscribeReports();
+  }, [isAdminUser]);
 
   // Sync real-time data from Firestore
   useEffect(() => {
@@ -545,6 +736,7 @@ export default function App() {
       prev.map((d) => (d.id === debate.id ? { ...d, views: updatedViews } : d))
     );
     setSelectedDebate({ ...debate, views: updatedViews });
+    setAdPreferences((prev) => recordTagAffinity(prev, debate.tags, 1));
 
     if (!skipPushState) {
       const url = new URL(window.location.href);
@@ -573,6 +765,12 @@ export default function App() {
   // Support mobile Android back gesture & browser navigation without exiting site
   useEffect(() => {
     const handlePopState = (e: PopStateEvent) => {
+      const parsedRoute = parseRouteFromPathname(window.location.pathname);
+      setActiveInfoPage(parsedRoute.infoPage);
+      if (!parsedRoute.infoPage) {
+        setActiveSection(parsedRoute.section);
+      }
+
       const urlParams = new URLSearchParams(window.location.search);
       const debateId = e.state?.debateId || urlParams.get('debate');
       if (debateId) {
@@ -616,6 +814,7 @@ export default function App() {
 
   const handleVote = (side: 'for' | 'against') => {
     if (!selectedDebate) return;
+    setAdPreferences((prev) => recordTagAffinity(prev, selectedDebate.tags, 2));
     const previousVote = userVotes[selectedDebate.id];
 
     // If the user clicks on the already selected option, deselect it and return to neutral
@@ -696,6 +895,7 @@ export default function App() {
     setUserDebateLikes((prev) => ({ ...prev, [debateId]: !isLiked }));
 
     if (!isLiked && targetDebate) {
+      setAdPreferences((prev) => recordTagAffinity(prev, targetDebate.tags, 2));
       triggerPushNotification(
         {
           type: 'debate_like',
@@ -897,6 +1097,9 @@ export default function App() {
         return { ...p, likes: newLikes };
       })
     );
+    if (!isLiked && targetPost) {
+      setAdPreferences((prev) => recordTagAffinity(prev, targetPost.tags, 2));
+    }
     setUserPostLikes((prev) => ({ ...prev, [postId]: !isLiked }));
 
     if (!isLiked && targetPost) {
@@ -1171,6 +1374,26 @@ export default function App() {
     });
   };
 
+  const handleOpenReportPost = (post: SocialPost) => {
+    setReportTarget({
+      targetType: 'post',
+      targetId: post.id,
+      debateId: post.id,
+      targetPreview: post.content,
+      targetAuthorHandle: post.author.name || post.author.handle,
+    });
+  };
+
+  const handleOpenReportPostComment = (comm: PostComment) => {
+    setReportTarget({
+      targetType: 'post_comment',
+      targetId: comm.id,
+      debateId: comm.postId,
+      targetPreview: comm.content,
+      targetAuthorHandle: comm.author.name || comm.author.handle,
+    });
+  };
+
   const handleSubmitAnonymousReport = (rawReport: AnonymousModerationReport) => {
     // Strictly whitelist ONLY non-identifying report fields so the report can NEVER link back to user identity
     const untraceableReport: AnonymousModerationReport = {
@@ -1181,6 +1404,7 @@ export default function App() {
       targetPreview: rawReport.targetPreview,
       reason: rawReport.reason,
       ...(rawReport.details ? { details: rawReport.details } : {}),
+      status: 'pending',
       createdAt: rawReport.createdAt,
     };
 
@@ -1190,14 +1414,76 @@ export default function App() {
       return next;
     });
 
-    const existingReports = getStoredAnonymousReports();
-    saveStoredAnonymousReports([untraceableReport, ...existingReports]);
+    setModerationReports((prev) => {
+      const updated = [untraceableReport, ...prev.filter((r) => r.id !== untraceableReport.id)];
+      saveStoredAnonymousReports(updated);
+      return updated;
+    });
 
     if (auth.currentUser) {
       setDoc(
         doc(db, 'moderation_reports', untraceableReport.id),
         sanitizeForFirestore(untraceableReport)
       ).catch(() => {});
+    }
+  };
+
+  const handleDismissModerationReport = (reportId: string) => {
+    setModerationReports((prev) => {
+      const updated = prev.map((r) =>
+        r.id === reportId ? { ...r, status: 'dismissed' as const } : r
+      );
+      saveStoredAnonymousReports(updated);
+      return updated;
+    });
+    if (auth.currentUser) {
+      updateDoc(doc(db, 'moderation_reports', reportId), { status: 'dismissed' }).catch(() => {});
+    }
+  };
+
+  const handleDeleteReportedTarget = async (report: AnonymousModerationReport) => {
+    if (report.targetType === 'debate') {
+      await handleDeleteDebate(report.targetId);
+    } else if (report.targetType === 'argument') {
+      await handleDeleteArgument(report.targetId);
+    } else if (report.targetType === 'post') {
+      setSocialPosts((prev) => prev.filter((p) => p.id !== report.targetId));
+      setPostComments((prev) => prev.filter((c) => c.postId !== report.targetId));
+      if (selectedPostId === report.targetId) {
+        setSelectedPostId(null);
+      }
+      if (auth.currentUser) {
+        deleteDoc(doc(db, 'social_posts', report.targetId)).catch(() => {});
+      }
+    } else if (report.targetType === 'post_comment') {
+      const targetComm = postComments.find((c) => c.id === report.targetId);
+      setPostComments((prev) => prev.filter((c) => c.id !== report.targetId));
+      if (targetComm) {
+        setSocialPosts((prev) =>
+          prev.map((p) =>
+            p.id === targetComm.postId
+              ? { ...p, commentsCount: Math.max(0, (p.commentsCount || 1) - 1) }
+              : p
+          )
+        );
+      }
+      if (auth.currentUser) {
+        deleteDoc(doc(db, 'post_comments', report.targetId)).catch(() => {});
+      }
+    }
+
+    setModerationReports((prev) => {
+      const updated = prev.map((r) =>
+        r.id === report.id || r.targetId === report.targetId
+          ? { ...r, status: 'resolved' as const }
+          : r
+      );
+      saveStoredAnonymousReports(updated);
+      return updated;
+    });
+
+    if (auth.currentUser) {
+      updateDoc(doc(db, 'moderation_reports', report.id), { status: 'resolved' }).catch(() => {});
     }
   };
 
@@ -1312,17 +1598,37 @@ export default function App() {
           publicPostAuthor={publicPostAuthor}
           ambientEnabled={ambientEnabled}
           initialTab={settingsInitialTab}
+          adPreferences={adPreferences}
           onClose={() => setIsSettingsOpen(false)}
           onUpdateAuthor={handleUpdateAuthor}
           onUpdatePublicPostAuthor={handleUpdatePublicPostAuthor}
           onToggleAmbient={() => setAmbientEnabled(!ambientEnabled)}
+          onTogglePersonalizedAds={handleTogglePersonalizedAds}
+          onResetAdInterests={handleResetAdInterests}
+          onNavigateInfoPage={handleNavigateInfoPage}
         />
+        {showBackToTop && (
+          <button
+            type="button"
+            onClick={handleScrollToTop}
+            aria-label="Back to Top"
+            title="Back to Top"
+            className={`fixed bottom-24 right-4 sm:bottom-6 sm:right-6 z-40 inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-full text-xs font-bold border shadow-xl backdrop-blur-xl transition-all duration-200 cursor-pointer active:scale-95 ${
+              isDark
+                ? 'bg-[#0b1120]/90 border-sky-500/40 text-sky-300 hover:bg-sky-500 hover:text-white hover:border-sky-400 shadow-black/60'
+                : 'bg-white/95 border-slate-300 text-slate-800 hover:bg-sky-600 hover:text-white hover:border-sky-600 shadow-slate-300/60'
+            }`}
+          >
+            <ArrowUp className="w-3.5 h-3.5 stroke-[2.5]" />
+            <span>Back to Top</span>
+          </button>
+        )}
       </>
     );
   }
 
   return (
-    <div className={`min-h-screen flex flex-col font-sans relative overflow-x-hidden ${isDark ? 'bg-black text-white' : 'bg-slate-50 text-slate-900'}`}>
+    <div className={`min-h-screen flex flex-col font-sans relative overflow-x-clip ${isDark ? 'bg-black text-white' : 'bg-slate-50 text-slate-900'}`}>
       {/* Offline connectivity indicator */}
       <OfflineIndicator />
 
@@ -1347,15 +1653,19 @@ export default function App() {
         </div>
       )}
 
-      {/* Top Navbar */}
-      <header className={`px-3 sm:px-5 py-2 sm:py-3 backdrop-blur-md sticky top-0 z-30 border-b transition-colors ${
-        isDark ? 'border-[#141928] bg-black/90' : 'border-slate-200 bg-white/90 shadow-xs'
-      }`}>
-        <div className="max-w-6xl mx-auto flex items-center justify-between gap-2 sm:gap-3">
+      {/* Persistent & Sticky Top Navigation Header (with subtle backdrop blur across all pages & info pages) */}
+      <header
+        className={`sticky top-0 z-30 backdrop-blur-xl border-b transition-colors ${
+          isDark
+            ? 'border-[#141928] bg-black/85 shadow-lg shadow-black/30'
+            : 'border-slate-200/90 bg-white/85 shadow-xs'
+        }`}
+      >
+        {/* Top Row: Brand Logo + Quick Utility Controls */}
+        <div className="max-w-6xl mx-auto px-3 sm:px-5 py-2 sm:py-2.5 flex items-center justify-between gap-2 sm:gap-3">
           <div
             onClick={() => {
-              setActiveSection('debates');
-              setSelectedPostId(null);
+              handleNavigateSection('debates');
             }}
             className="flex items-center gap-2 shrink-0 cursor-pointer"
           >
@@ -1457,140 +1767,199 @@ export default function App() {
             </button>
           </div>
         </div>
-      </header>
 
-      {/* Main Container */}
-      <main className="max-w-6xl w-full mx-auto px-0 sm:px-4 md:px-6 pt-2.5 sm:pt-5 pb-24 sm:pb-8 flex-1 flex flex-col relative z-10">
-        {/* Top Section Tabs + Search Bar */}
-        <div className="px-3 sm:px-0 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 sm:gap-3 mb-3.5 sm:mb-5">
-          <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar">
-            {/* MAIN SECTION 1: DEBATES (No count badge) */}
-            <button
-              type="button"
-              onClick={() => {
-                setActiveSection('debates');
-                setSelectedPostId(null);
-              }}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-extrabold tracking-tight transition-all cursor-pointer border shrink-0 whitespace-nowrap ${
-                activeSection === 'debates'
-                  ? isDark
-                    ? 'bg-white text-black border-white shadow-xs'
-                    : 'bg-slate-900 text-white border-slate-900 shadow-xs'
-                  : isDark
-                  ? 'bg-white/[0.04] border-white/[0.08] text-slate-400 hover:text-white'
-                  : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Scale className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              <span>{t('debates')}</span>
-            </button>
-
-            {/* MAIN SECTION 2: POSTS (No count badge) */}
-            <button
-              type="button"
-              onClick={() => {
-                setActiveSection('posts');
-              }}
-              className={`inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl text-xs sm:text-sm font-extrabold tracking-tight transition-all cursor-pointer border shrink-0 whitespace-nowrap ${
-                activeSection === 'posts'
-                  ? isDark
-                    ? 'bg-sky-500 text-white border-sky-500 shadow-xs'
-                    : 'bg-sky-600 text-white border-sky-600 shadow-xs'
-                  : isDark
-                  ? 'bg-white/[0.04] border-white/[0.08] text-slate-400 hover:text-white'
-                  : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <MessageSquareText className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
-              <span>Posts</span>
-            </button>
-
-            {/* SUB-SECTION: WHAT'S TRENDING NOW */}
-            <button
-              type="button"
-              onClick={() => setActiveSection('trending')}
-              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs sm:text-sm font-bold tracking-tight transition-all cursor-pointer border shrink-0 whitespace-nowrap ${
-                activeSection === 'trending'
-                  ? 'bg-gradient-to-r from-amber-500 to-rose-500 text-white border-transparent shadow-sm'
-                  : isDark
-                  ? 'bg-amber-500/10 border-amber-500/25 text-amber-300 hover:bg-amber-500/20'
-                  : 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100'
-              }`}
-            >
-              <Flame
-                className={`w-3.5 h-3.5 ${
-                  activeSection === 'trending'
-                    ? 'fill-white text-white'
-                    : 'fill-amber-500 text-amber-500'
-                }`}
-              />
-              <span>Trending Now</span>
-            </button>
-          </div>
-
-          {/* Search + 50/50 Split Filter */}
-          <div className="flex items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
-            <div className="relative flex-1 sm:w-72 md:w-80 sm:flex-none">
-              <Search className={`w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none ${isDark ? 'text-slate-500' : 'text-slate-400'}`} />
-              <input
-                type="text"
-                value={searchQuery}
-                onChange={(e) => {
-                  setSearchQuery(e.target.value);
-                  if (activeSection === 'trending' && e.target.value.trim().length >= 2) {
-                    setActiveSection('debates');
-                  }
-                }}
-                placeholder={
-                  activeSection === 'posts'
-                    ? 'Search posts, people, statements, or tags...'
-                    : 'Search or ask AI any topic...'
-                }
-                className={`w-full rounded-xl pl-8 pr-7 py-2 sm:py-1.5 text-xs transition-colors focus:outline-none ${
-                  isDark
-                    ? 'bg-[#060810] border border-[#141928] text-white placeholder-slate-500 focus:border-sky-500/60'
-                    : 'bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:border-sky-500'
-                }`}
-              />
-              {searchQuery && (
-                <button
-                  type="button"
-                  onClick={() => setSearchQuery('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded-full text-slate-400 hover:text-white cursor-pointer"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-
-            {activeSection === 'debates' && (
+        {/* Second Row inside Sticky Header: Persistent Feed Tabs + Info Page Links + Search Bar */}
+        <div
+          className={`border-t transition-colors ${
+            isDark ? 'border-[#141928]/80 bg-black/40' : 'border-slate-200/70 bg-slate-50/60'
+          }`}
+        >
+          <div className="max-w-6xl mx-auto px-3 sm:px-5 py-2 flex flex-col sm:flex-row sm:items-center justify-between gap-2 sm:gap-3">
+            <div className="flex items-center gap-1.5 sm:gap-2 overflow-x-auto no-scrollbar">
+              {/* MAIN SECTION 1: DEBATES */}
               <button
-                onClick={() => setIsContestedOnly((prev) => !prev)}
-                title="Show closely contested 50/50 split debates"
-                className={`inline-flex items-center gap-1 px-2.5 py-2 sm:py-1.5 rounded-xl text-xs font-semibold tracking-tight transition-all cursor-pointer shrink-0 border select-none active:scale-95 whitespace-nowrap ${
-                  isContestedOnly
-                    ? 'bg-purple-500/15 text-purple-400 border-purple-500/40 shadow-xs'
+                type="button"
+                onClick={() => {
+                  handleNavigateSection('debates');
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-extrabold tracking-tight transition-all cursor-pointer border shrink-0 whitespace-nowrap ${
+                  !activeInfoPage && activeSection === 'debates'
+                    ? isDark
+                      ? 'bg-white text-black border-white shadow-xs'
+                      : 'bg-slate-900 text-white border-slate-900 shadow-xs'
                     : isDark
-                    ? 'bg-white/[0.04] border-white/[0.08] text-slate-400 hover:text-white hover:bg-white/[0.07]'
-                    : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    ? 'bg-white/[0.04] border-white/[0.08] text-slate-400 hover:text-white'
+                    : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900'
                 }`}
               >
-                <Scale className={`w-3.5 h-3.5 ${isContestedOnly ? 'text-purple-400' : 'text-slate-400'}`} />
-                <span className="hidden md:inline">50/50 Split</span>
+                <Scale className="w-3.5 h-3.5" />
+                <span>{t('debates')}</span>
               </button>
+
+              {/* MAIN SECTION 2: POSTS */}
+              <button
+                type="button"
+                onClick={() => {
+                  handleNavigateSection('posts');
+                }}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-extrabold tracking-tight transition-all cursor-pointer border shrink-0 whitespace-nowrap ${
+                  !activeInfoPage && activeSection === 'posts'
+                    ? isDark
+                      ? 'bg-sky-500 text-white border-sky-500 shadow-xs'
+                      : 'bg-sky-600 text-white border-sky-600 shadow-xs'
+                    : isDark
+                    ? 'bg-white/[0.04] border-white/[0.08] text-slate-400 hover:text-white'
+                    : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <MessageSquareText className="w-3.5 h-3.5" />
+                <span>Posts</span>
+              </button>
+
+              {/* SUB-SECTION: WHAT'S TRENDING NOW */}
+              <button
+                type="button"
+                onClick={() => handleNavigateSection('trending')}
+                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold tracking-tight transition-all cursor-pointer border shrink-0 whitespace-nowrap ${
+                  !activeInfoPage && activeSection === 'trending'
+                    ? 'bg-gradient-to-r from-amber-500 to-rose-500 text-white border-transparent shadow-sm'
+                    : isDark
+                    ? 'bg-amber-500/10 border-amber-500/25 text-amber-300 hover:bg-amber-500/20'
+                    : 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100'
+                }`}
+              >
+                <Flame
+                  className={`w-3.5 h-3.5 ${
+                    !activeInfoPage && activeSection === 'trending'
+                      ? 'fill-white text-white'
+                      : 'fill-amber-500 text-amber-500'
+                  }`}
+                />
+                <span>Trending Now</span>
+              </button>
+
+              {/* Divider + Persistent Info & Policy Quick Pills (Always accessible in sticky header) */}
+              <span
+                aria-hidden="true"
+                className={`h-4 w-px mx-0.5 shrink-0 ${
+                  isDark ? 'bg-[#1a2236]' : 'bg-slate-200'
+                }`}
+              />
+
+              {(
+                [
+                  { id: 'about' as InfoPageRoute, label: 'About', path: '/about' },
+                  { id: 'guidelines' as InfoPageRoute, label: 'Guidelines', path: '/guidelines' },
+                  { id: 'privacy' as InfoPageRoute, label: 'Privacy', path: '/privacy' },
+                  { id: 'contact' as InfoPageRoute, label: 'Contact', path: '/contact' },
+                  { id: 'moderation' as InfoPageRoute, label: 'Safety', path: '/moderation' },
+                ] as const
+              ).map((item) => {
+                const isActive = activeInfoPage === item.id;
+                return (
+                  <a
+                    key={item.id}
+                    href={item.path}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleNavigateInfoPage(item.id);
+                    }}
+                    className={`inline-flex items-center px-2.5 py-1.5 rounded-xl text-xs font-semibold transition-all cursor-pointer border shrink-0 whitespace-nowrap ${
+                      isActive
+                        ? 'bg-sky-500/20 text-sky-400 border-sky-500/50 shadow-2xs'
+                        : isDark
+                        ? 'bg-white/[0.02] border-white/[0.06] text-slate-400 hover:text-white hover:bg-white/[0.06]'
+                        : 'bg-white/80 border-slate-200/80 text-slate-600 hover:text-slate-900 hover:bg-white'
+                    }`}
+                  >
+                    {item.label}
+                  </a>
+                );
+              })}
+            </div>
+
+            {/* Search + 50/50 Split Filter */}
+            {!activeInfoPage && (
+              <div className="flex items-center gap-1.5 sm:gap-2 w-full sm:w-auto">
+                <div className="relative flex-1 sm:w-64 md:w-72 sm:flex-none">
+                  <Search className={`w-3.5 h-3.5 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none ${isDark ? 'text-slate-500' : 'text-slate-400'}`} />
+                  <input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => {
+                      setSearchQuery(e.target.value);
+                      if (activeSection === 'trending' && e.target.value.trim().length >= 2) {
+                        setActiveSection('debates');
+                      }
+                    }}
+                    placeholder={
+                      activeSection === 'posts'
+                        ? 'Search posts, people, statements, or tags...'
+                        : 'Search or ask AI any topic...'
+                    }
+                    className={`w-full rounded-xl pl-8 pr-7 py-1.5 text-xs transition-colors focus:outline-none ${
+                      isDark
+                        ? 'bg-[#060810] border border-[#141928] text-white placeholder-slate-500 focus:border-sky-500/60'
+                        : 'bg-white border border-slate-200 text-slate-900 placeholder-slate-400 focus:border-sky-500'
+                    }`}
+                  />
+                  {searchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded-full text-slate-400 hover:text-white cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {activeSection === 'debates' && (
+                  <button
+                    onClick={() => setIsContestedOnly((prev) => !prev)}
+                    title="Show closely contested 50/50 split debates"
+                    className={`inline-flex items-center gap-1 px-2.5 py-1.5 rounded-xl text-xs font-semibold tracking-tight transition-all cursor-pointer shrink-0 border select-none active:scale-95 whitespace-nowrap ${
+                      isContestedOnly
+                        ? 'bg-purple-500/15 text-purple-400 border-purple-500/40 shadow-xs'
+                        : isDark
+                        ? 'bg-white/[0.04] border-white/[0.08] text-slate-400 hover:text-white hover:bg-white/[0.07]'
+                        : 'bg-white border-slate-200 text-slate-600 hover:text-slate-900 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Scale className={`w-3.5 h-3.5 ${isContestedOnly ? 'text-purple-400' : 'text-slate-400'}`} />
+                    <span className="hidden md:inline">50/50 Split</span>
+                  </button>
+                )}
+              </div>
             )}
           </div>
         </div>
+      </header>
+
+      {/* Main Container */}
+      <main className="max-w-6xl w-full mx-auto px-0 sm:px-4 md:px-6 pt-3 sm:pt-5 pb-24 sm:pb-8 flex-1 flex flex-col relative z-10">
 
         {/* ===================================================================
-            SUB-SECTION FULL VIEW: WHAT'S TRENDING NOW
+            INFORMATION, POLICY & MODERATION PAGES (/about, /guidelines, /privacy, /contact, /moderation)
            =================================================================== */}
-        {activeSection === 'trending' ? (
+        {activeInfoPage ? (
+          <InfoPagesView
+            activePage={activeInfoPage}
+            onNavigatePage={handleNavigateInfoPage}
+            onBackToFeed={() => handleNavigateSection('debates')}
+            onOpenAdSettings={() => setIsSettingsOpen(true)}
+            reports={moderationReports}
+            isAdminUser={isAdminUser}
+            adminEmail={currentUserEmail}
+            onDismissReport={handleDismissModerationReport}
+            onDeleteReportedTarget={handleDeleteReportedTarget}
+          />
+        ) : activeSection === 'trending' ? (
           <TrendingPulseSection
             variant="page"
             debates={debates}
-            onOpenTrendingPage={() => setActiveSection('trending')}
-            onBackToDebates={() => setActiveSection('debates')}
+            onOpenTrendingPage={() => handleNavigateSection('trending')}
+            onBackToDebates={() => handleNavigateSection('debates')}
             onSelectDebate={handleSelectDebate}
             onLaunchTrendDebate={handleLaunchDebateFromAiSearch}
           />
@@ -1608,7 +1977,7 @@ export default function App() {
                     <TrendingPulseSection
                       variant="glimpse"
                       debates={debates}
-                      onOpenTrendingPage={() => setActiveSection('trending')}
+                      onOpenTrendingPage={() => handleNavigateSection('trending')}
                       onSelectDebate={handleSelectDebate}
                       onLaunchTrendDebate={handleLaunchDebateFromAiSearch}
                     />
@@ -1621,18 +1990,24 @@ export default function App() {
                     currentAuthor={publicPostAuthor}
                     userPostLikes={userPostLikes}
                     userCommentLikes={userPostCommentLikes}
+                    reportedItems={reportedItems}
                     selectedPostId={selectedPostId}
+                    adPreferences={adPreferences}
                     onSelectPostId={setSelectedPostId}
                     onCreatePost={handleCreatePost}
                     onTogglePostLike={handleTogglePostLike}
                     onAddComment={handleAddPostComment}
                     onToggleCommentLike={handleTogglePostCommentLike}
+                    onReportPost={handleOpenReportPost}
+                    onReportPostComment={handleOpenReportPostComment}
                     onStartDebateFromPost={handleStartDebateFromPost}
                     onOpenDebate={handleSelectDebate}
                     onOpenProfileSettings={() => {
                       setSettingsInitialTab('post');
                       setIsSettingsOpen(true);
                     }}
+                    onDismissAd={handleDismissAd}
+                    onOpenAdSettings={() => setIsSettingsOpen(true)}
                   />
                 </>
               ) : (
@@ -1645,7 +2020,13 @@ export default function App() {
                         <button
                           key={tag}
                           type="button"
-                          onClick={() => setSelectedTag(active && tag !== 'ALL' ? 'ALL' : tag)}
+                          onClick={() => {
+                            const nextTag = active && tag !== 'ALL' ? 'ALL' : tag;
+                            setSelectedTag(nextTag);
+                            if (nextTag !== 'ALL') {
+                              setAdPreferences((prev) => recordTagAffinity(prev, [nextTag], 2));
+                            }
+                          }}
                           className={`px-2.5 py-1.5 sm:py-1 rounded-lg text-[11px] font-mono font-semibold tracking-wider transition-all cursor-pointer shrink-0 border whitespace-nowrap ${
                             active
                               ? 'bg-sky-500 text-white border-sky-500 shadow-xs'
@@ -1680,52 +2061,93 @@ export default function App() {
                     />
                   )}
 
-                  {/* Debates Feed: End-to-end timeline with separating lines */}
+                  {/* Debates Feed: End-to-end timeline with separating lines + Interleaved In-Feed Ad Units */}
                   {filteredDebates.length === 0 ? (
                     <div className="text-center py-12 text-slate-400 text-sm">
                       {t('noDebatesFound')}
                     </div>
                   ) : (
                     <div className="w-full border-t border-b sm:border sm:rounded-2xl sm:overflow-hidden border-slate-200 dark:border-[#141928] bg-white dark:bg-[#060810]/95">
-                      {filteredDebates.map((debate) => {
-                        const currentArgs = argumentsList.filter(
-                          (a) => a.debateId === debate.id
+                      {(() => {
+                        const debateAdPlacements = getVariableAdPlacements(
+                          filteredDebates.length,
+                          `debates_${selectedTag}`,
+                          6,
+                          10
                         );
-                        return (
-                          <TopicCard
-                            key={debate.id}
-                            debate={debate}
-                            argumentsList={currentArgs}
-                            ambientEnabled={ambientEnabled}
-                            isLiked={!!userDebateLikes[debate.id]}
-                            isReported={!!reportedItems[debate.id]}
-                            isTrending={false}
-                            userVote={userVotes[debate.id]}
-                            onToggleLike={handleToggleDebateLike}
-                            onReportDebate={handleOpenReportDebate}
-                            onSelect={handleSelectDebate}
-                            onSelectTag={(tag) => setSelectedTag((prev) => (prev === tag.toUpperCase() ? 'ALL' : tag.toUpperCase()))}
-                            onOpenOriginalPost={handleOpenOriginalPost}
-                          />
-                        );
-                      })}
+                        return filteredDebates.map((debate, debateIdx) => {
+                          const currentArgs = argumentsList.filter(
+                            (a) => a.debateId === debate.id
+                          );
+                          const adSlotIndex = debateAdPlacements.get(debateIdx);
+
+                          return (
+                            <React.Fragment key={debate.id}>
+                              <TopicCard
+                                debate={debate}
+                                argumentsList={currentArgs}
+                                ambientEnabled={ambientEnabled}
+                                isLiked={!!userDebateLikes[debate.id]}
+                                isReported={!!reportedItems[debate.id]}
+                                isTrending={false}
+                                userVote={userVotes[debate.id]}
+                                onToggleLike={handleToggleDebateLike}
+                                onReportDebate={handleOpenReportDebate}
+                                onSelect={handleSelectDebate}
+                                onSelectTag={(tag) => {
+                                  const upper = tag.toUpperCase();
+                                  setSelectedTag((prev) => (prev === upper ? 'ALL' : upper));
+                                  setAdPreferences((prev) => recordTagAffinity(prev, [upper], 2));
+                                }}
+                                onOpenOriginalPost={handleOpenOriginalPost}
+                              />
+                              {adSlotIndex !== undefined && (
+                                <AdUnitCard
+                                  slotIndex={adSlotIndex}
+                                  placement="infeed-debate"
+                                  adPreferences={adPreferences}
+                                  contextualTags={
+                                    selectedTag !== 'ALL' ? [selectedTag] : debate.tags
+                                  }
+                                  onDismissAd={handleDismissAd}
+                                  onOpenAdSettings={() => setIsSettingsOpen(true)}
+                                  onStartSponsoredDebate={handleStartSponsoredDebate}
+                                />
+                              )}
+                            </React.Fragment>
+                          );
+                        });
+                      })()}
                     </div>
                   )}
                 </>
               )}
             </div>
 
-            {/* RIGHT STICKY SUB-SECTION: X-Style "What's Trending Now" Sidebar (Desktop lg+) */}
+            {/* RIGHT STICKY SUB-SECTION: X-Style "What's Trending Now" Sidebar + Desktop Display Ad (Desktop lg+) */}
             <TrendingPulseSection
               variant="sidebar"
               debates={debates}
-              onOpenTrendingPage={() => setActiveSection('trending')}
+              adPreferences={adPreferences}
+              contextualTags={selectedTag !== 'ALL' ? [selectedTag] : ['INDIA', 'TECH']}
+              onOpenTrendingPage={() => handleNavigateSection('trending')}
               onSelectDebate={handleSelectDebate}
               onLaunchTrendDebate={handleLaunchDebateFromAiSearch}
+              onDismissAd={handleDismissAd}
+              onOpenAdSettings={() => setIsSettingsOpen(true)}
+              onNavigateInfoPage={handleNavigateInfoPage}
             />
           </div>
         )}
       </main>
+
+      {/* Site-Wide Footer Navigation (About, Community Guidelines, Privacy Policy, Contact, Moderation & Safety) */}
+      <Footer
+        activePage={activeInfoPage}
+        onNavigateInfoPage={handleNavigateInfoPage}
+        onNavigateMainFeed={handleNavigateSection}
+        onOpenAdSettings={() => setIsSettingsOpen(true)}
+      />
 
       {/* MOBILE THUMB-ZONE FIXED BOTTOM TAB BAR (< 640px sm:hidden) */}
       <nav
@@ -1740,24 +2162,23 @@ export default function App() {
           <button
             type="button"
             onClick={() => {
-              setActiveSection('debates');
-              setSelectedPostId(null);
+              handleNavigateSection('debates');
             }}
             className={`flex flex-col items-center justify-center h-full gap-0.5 cursor-pointer transition-colors ${
-              activeSection === 'debates'
+              !activeInfoPage && activeSection === 'debates'
                 ? isDark ? 'text-white font-bold' : 'text-slate-900 font-bold'
                 : ''
             }`}
           >
-            <Scale className={`w-4 h-4 ${activeSection === 'debates' ? 'text-sky-400' : ''}`} />
+            <Scale className={`w-4 h-4 ${!activeInfoPage && activeSection === 'debates' ? 'text-sky-400' : ''}`} />
             <span className="text-[10px] tracking-tight whitespace-nowrap">{t('debates')}</span>
           </button>
 
           <button
             type="button"
-            onClick={() => setActiveSection('posts')}
+            onClick={() => handleNavigateSection('posts')}
             className={`flex flex-col items-center justify-center h-full gap-0.5 cursor-pointer transition-colors ${
-              activeSection === 'posts'
+              !activeInfoPage && activeSection === 'posts'
                 ? 'text-sky-400 font-bold'
                 : ''
             }`}
@@ -1783,14 +2204,14 @@ export default function App() {
 
           <button
             type="button"
-            onClick={() => setActiveSection('trending')}
+            onClick={() => handleNavigateSection('trending')}
             className={`flex flex-col items-center justify-center h-full gap-0.5 cursor-pointer transition-colors ${
-              activeSection === 'trending'
+              !activeInfoPage && activeSection === 'trending'
                 ? 'text-amber-400 font-bold'
                 : ''
             }`}
           >
-            <Flame className={`w-4 h-4 ${activeSection === 'trending' ? 'fill-amber-400 text-amber-400' : ''}`} />
+            <Flame className={`w-4 h-4 ${!activeInfoPage && activeSection === 'trending' ? 'fill-amber-400 text-amber-400' : ''}`} />
             <span className="text-[10px] tracking-tight whitespace-nowrap">Trending</span>
           </button>
 
@@ -1829,6 +2250,24 @@ export default function App() {
         onCreateDebate={handleCreateDebate}
       />
 
+      {/* Floating 'Back to Top' Button (Appears when scrolling past initial screen) */}
+      {showBackToTop && (
+        <button
+          type="button"
+          onClick={handleScrollToTop}
+          aria-label="Back to Top"
+          title="Back to Top"
+          className={`fixed bottom-20 right-4 sm:bottom-6 sm:right-6 z-40 inline-flex items-center gap-1.5 px-3.5 py-2.5 rounded-full text-xs font-bold border shadow-xl backdrop-blur-xl transition-all duration-200 cursor-pointer active:scale-95 ${
+            isDark
+              ? 'bg-[#0b1120]/90 border-sky-500/40 text-sky-300 hover:bg-sky-500 hover:text-white hover:border-sky-400 shadow-black/60'
+              : 'bg-white/95 border-slate-300 text-slate-800 hover:bg-sky-600 hover:text-white hover:border-sky-600 shadow-slate-300/60'
+          }`}
+        >
+          <ArrowUp className="w-3.5 h-3.5 stroke-[2.5]" />
+          <span>Back to Top</span>
+        </button>
+      )}
+
       {/* Settings Modal */}
       <SettingsModal
         isOpen={isSettingsOpen}
@@ -1836,10 +2275,14 @@ export default function App() {
         publicPostAuthor={publicPostAuthor}
         ambientEnabled={ambientEnabled}
         initialTab={settingsInitialTab}
+        adPreferences={adPreferences}
         onClose={() => setIsSettingsOpen(false)}
         onUpdateAuthor={handleUpdateAuthor}
         onUpdatePublicPostAuthor={handleUpdatePublicPostAuthor}
         onToggleAmbient={() => setAmbientEnabled(!ambientEnabled)}
+        onTogglePersonalizedAds={handleTogglePersonalizedAds}
+        onResetAdInterests={handleResetAdInterests}
+        onNavigateInfoPage={handleNavigateInfoPage}
       />
     </div>
   );

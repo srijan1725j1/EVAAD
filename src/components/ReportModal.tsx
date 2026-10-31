@@ -12,7 +12,7 @@ import {
 import { useTheme } from '../contexts/ThemeContext';
 
 export interface ReportTargetInfo {
-  targetType: 'debate' | 'argument';
+  targetType: 'debate' | 'argument' | 'post' | 'post_comment';
   targetId: string;
   debateId: string;
   targetPreview: string;
@@ -38,8 +38,8 @@ const REPORT_REASONS: Array<{
   },
   {
     id: 'harassment',
-    label: 'Harassment, Personal Attack, or Bullying',
-    description: 'Targeted abuse, threats of violence, or intimidation against individuals.',
+    label: 'Harassment, Threats, or Bullying',
+    description: 'Targeted abuse, threats of violence, illegal content, or intimidation.',
   },
   {
     id: 'doxxing_privacy',
@@ -52,9 +52,14 @@ const REPORT_REASONS: Array<{
     description: 'Fabricated quotes, manipulated images, or harmful unverified claims.',
   },
   {
+    id: 'copyright',
+    label: 'Copyright or Intellectual Property Infringement',
+    description: 'Unauthorized reproduction of copyrighted text, images, or video.',
+  },
+  {
     id: 'spam',
     label: 'Spam, Bot Activity, or Off-Topic',
-    description: 'Repetitive promotional links, automated flooding, or derailing the debate.',
+    description: 'Repetitive promotional links, automated flooding, or derailing the discussion.',
   },
   {
     id: 'other',
@@ -62,6 +67,19 @@ const REPORT_REASONS: Array<{
     description: 'Violates community guidelines for constructive 180° public discourse.',
   },
 ];
+
+function getTargetLabel(targetType: ReportTargetInfo['targetType']): string {
+  switch (targetType) {
+    case 'debate':
+      return 'Debate Proposition';
+    case 'argument':
+      return 'Argument';
+    case 'post':
+      return 'Post';
+    case 'post_comment':
+      return 'Post Comment';
+  }
+}
 
 export const ReportModal: React.FC<ReportModalProps> = ({
   isOpen,
@@ -132,7 +150,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             </div>
             <div>
               <h3 className="text-sm sm:text-base font-extrabold tracking-tight">
-                Report {target.targetType === 'debate' ? 'Debate Proposition' : 'Argument'}
+                Report {getTargetLabel(target.targetType)}
               </h3>
               <p className={`text-[11px] font-mono ${isDark ? 'text-emerald-400' : 'text-emerald-700'}`}>
                 100% Untraceable · Zero Identity Link
@@ -230,7 +248,7 @@ export const ReportModal: React.FC<ReportModalProps> = ({
             >
               <div className="flex items-center justify-between gap-2 mb-1 text-[11px] font-mono text-slate-400">
                 <span>
-                  Flagging {target.targetType === 'debate' ? 'Debate Topic' : 'Argument'}
+                  Flagging {getTargetLabel(target.targetType)}
                   {target.targetAuthorHandle ? ` by ${target.targetAuthorHandle}` : ''}
                 </span>
                 <Lock className="w-3 h-3 text-emerald-400" />
